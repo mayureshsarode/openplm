@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { AppError } from '../errors/index.js';
 import { logger } from '../utils/logger.js';
-import { config } from '../config/index.js';
 
 /**
  * Centralized error handler returning the approved OpenPLM error model.
@@ -78,6 +77,7 @@ export function errorHandler(
   }
 
   // Unexpected non-operational error: Convert to safe generic 500 response
+  // Original error details are logged server-side only — never exposed to clients.
   logger.error({
     message: err.message,
     requestId,
@@ -85,13 +85,10 @@ export function errorHandler(
     stack: err.stack,
   });
 
-  const isProduction = config.NODE_ENV === 'production';
-
   res.status(500).json({
     error: {
       code: 'INTERNAL_ERROR',
       message: 'An internal error occurred',
-      ...(!isProduction ? { details: { originalMessage: err.message } } : {}),
       requestId,
     },
   });

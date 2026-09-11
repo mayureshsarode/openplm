@@ -150,14 +150,18 @@ describe('Centralized Error Handling Middleware', () => {
     expect(res.body.error.message).toBe('Invalid JSON payload in request body');
   });
 
-  it('should convert unexpected errors into safe generic 500 response without leaking stack traces', async () => {
+  it('should convert unexpected errors into safe generic 500 response without leaking internal details', async () => {
     const res = await request(app).get('/test/unexpected-error');
 
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('INTERNAL_ERROR');
     expect(res.body.error.message).toBe('An internal error occurred');
     expect(res.body.error).not.toHaveProperty('stack');
+    expect(res.body.error).not.toHaveProperty('details');
     expect(res.body.error.requestId).toBeDefined();
+    // The original error message must never appear in the response body
+    expect(JSON.stringify(res.body)).not.toContain('Database disk I/O failure');
+    expect(JSON.stringify(res.body)).not.toContain('originalMessage');
   });
 
   it('should propagate client x-request-id across response headers and error payload', async () => {
@@ -169,4 +173,55 @@ describe('Centralized Error Handling Middleware', () => {
     expect(res.headers['x-request-id']).toBe(customRequestId);
     expect(res.body.error.requestId).toBe(customRequestId);
   });
+
+  it('should accept a valid client-provided request ID', async () => {
+    const validId = 'my-trace.id_123:abc';
+    const res = await request(app)
+      .get('/test/validation-error')
+      .set('x-request-id', validId);
+
+    expect(res.headers['x-request-id']).toBe(validId);
+    expect(res.body.error.requestId).toBe(validId);
+  });
+
+  it('should replace an invalid request ID with a server-generated UUID', async () => {
+    const invalidId = 'bad id with spaces & special <chars>';
+    const res = await request(app)
+      .get('/test/validation-error')
+      .set('x-request-id', invalidId);
+
+    // The response should NOT contain the invalid ID
+    expect(res.headers['x-request-id']).not.toBe(invalidId);
+    // The replacement should be a valid UUID v4 format
+    expect(res.headers['x-request-id']).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(res.body.error.requestId).toBe(res.headers['x-request-id']);
+  });
+
+  it('should replace an oversized request ID with a server-generated UUID', async () => {
+    const oversizedId = 'a'.repeat(200);
+    const res = await request(app)
+      .get('/test/validation-error')
+      .set('x-request-id', oversizedId);
+
+    expect(res.headers['x-request-id']).not.toBe(oversizedId);
+    expect(res.headers['x-request-id']).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(res.body.error.requestId).toBe(res.headers['x-request-id']);
+  });
+
+  it('should never expose original error message in unexpected error response regardless of environment', async () => {
+    const res = await request(app).get('/test/unexpected-error');
+
+    expect(res.status).toBe(500);
+    // Must always return the generic safe message
+    expect(res.body.error.message).toBe('An internal error occurred');
+    // Must never contain original error details in any form
+    expect(res.body.error).not.toHaveProperty('details');
+    expect(JSON.stringify(res.body)).not.toContain('Database disk I/O failure');
+    expect(JSON.stringify(res.body)).not.toContain('/var/lib/postgresql/data');
+  });
 });
+

@@ -1,8 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
+import { AppError } from '../errors/index.js';
 import { logger } from '../utils/logger.js';
 
 /**
- * Centralized error handler returning the approved error model.
+ * Centralized error handler returning the approved OpenPLM error model.
  *
  * Error format:
  * {
@@ -14,25 +15,80 @@ import { logger } from '../utils/logger.js';
  *   }
  * }
  */
-export function errorHandler(err: Error, req: Request, res: Response, _next: NextFunction): void {
-  const requestId = req.headers['x-request-id'] as string;
+export function errorHandler(
+  err: Error,
+  req: Request,
+  res: Response,
+  _next: NextFunction,
+): void {
+  const requestId =
+    (req.headers['x-request-id'] as string) ||
+    (res.getHeader('x-request-id') as string) ||
+    res.locals.requestId ||
+    'unknown';
 
+  // Handle malformed JSON body errors from express.json()
+  if (
+    err instanceof SyntaxError &&
+    'status' in err &&
+    err.status === 400 &&
+    'body' in err
+  ) {
+    res.status(400).json({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid JSON payload in request body',
+        requestId,
+      },
+    });
+    return;
+  }
+
+  // Handle known operational application errors
+  if (err instanceof AppError) {
+    if (err.statusCode >= 500) {
+      logger.error({
+        message: err.message,
+        code: err.code,
+        statusCode: err.statusCode,
+        requestId,
+        operation: `${req.method} ${req.path}`,
+        stack: err.stack,
+      });
+    } else {
+      logger.warn({
+        message: err.message,
+        code: err.code,
+        statusCode: err.statusCode,
+        requestId,
+        operation: `${req.method} ${req.path}`,
+      });
+    }
+
+    res.status(err.statusCode).json({
+      error: {
+        code: err.code,
+        message: err.message,
+        ...(err.details !== undefined ? { details: err.details } : {}),
+        requestId,
+      },
+    });
+    return;
+  }
+
+  // Unexpected non-operational error: Convert to safe generic 500 response
+  // Original error details are logged server-side only — never exposed to clients.
   logger.error({
     message: err.message,
     requestId,
-    stack: err.stack,
     operation: `${req.method} ${req.path}`,
+    stack: err.stack,
   });
 
-  const statusCode = 'statusCode' in err ? (err as Error & { statusCode: number }).statusCode : 500;
-  const code = 'code' in err ? (err as Error & { code: string }).code : 'INTERNAL_ERROR';
-  const details = 'details' in err ? (err as Error & { details: unknown }).details : undefined;
-
-  res.status(statusCode).json({
+  res.status(500).json({
     error: {
-      code,
-      message: statusCode === 500 ? 'An internal error occurred' : err.message,
-      details,
+      code: 'INTERNAL_ERROR',
+      message: 'An internal error occurred',
       requestId,
     },
   });

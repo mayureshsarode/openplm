@@ -1,0 +1,17 @@
+export {
+  AppError,
+  type AppErrorOptions,
+  ValidationError,
+  InvalidStateTransitionError,
+  ImmutableRevisionError,
+  DuplicateDependencyError,
+  SelfDependencyError,
+  CycleDetectedError,
+  InvalidQuantityError,
+  ImpactAnalysisRequiredError,
+  UnauthorizedError,
+  ForbiddenError,
+  NotFoundError,
+  ConflictError,
+  InternalError,
+} from './app-error.js';

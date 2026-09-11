@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import { config } from './config/index.js';
 import { requestIdMiddleware } from './middleware/request-id.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { v1Router } from './api/v1/router.js';
@@ -17,7 +18,7 @@ export function createApp(): express.Application {
   app.use(helmet());
   app.use(
     cors({
-      origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+      origin: config.CORS_ORIGIN,
       credentials: true,
     }),
   );
